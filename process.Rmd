@@ -1,0 +1,101 @@
+---
+title: "Canine Epilepsy - Sequence Processing"
+author: "BJC"
+date: "3/10/2020"
+output: html_document
+---
+
+## Data
+
+This data is from MiSeq V4 16S rRNA gene sequencing of fecal samples from 28 dogs. Primers are included at the start of the reads. The sequenced amplicon is ~290nts long, with very little length variation.
+
+## Setup
+
+Load libraries, setup paths, prepare environment:
+```{r init, warning=FALSE, message=FALSE}
+library(dada2);packageVersion("dada2")
+path.fastq <- "~/Desktop/Epilepsy/demux" # CHANGE ME to location of the raw fastq data
+path.filt <- file.path(path.fastq, "filtered") 
+path.fig <- "Figures/" # Local path. Assumes working directory is this files location
+path.rds <- "RDS/" # Local path...
+fnF <- list.files(path.fastq, pattern="_F.fastq.gz", full.names=TRUE)
+fnR <- list.files(path.fastq, pattern="_R.fastq.gz", full.names=TRUE)
+fnMeta <- "epilepsy_mapping.txt" # Local path...
+# Primer seqeuences are included on the reads
+F515 <- "GTGCCAGCAGCCGCGGT" # 17 nt
+R806 <- "GGACTACHVGGGTWTCTAAT" # 20nt
+```
+
+Inspect quality profile:
+```{r}
+plotQualityProfile(fnF[c(3,6,12)])
+plotQualityProfile(fnR[c(3,6,12)])
+```
+
+Quality is good, but some noticeable degradation starting at base-pair ~180 in the reverse reads. Choose `truncLen=c(240,180)` as the truncation parameters, which is more than enough to substantially overlap given the ~290nt sequenced amplicon length.
+
+Perform filtering:
+```{r}
+filtF <- file.path(path.filt, basename(fnF))
+filtR <- file.path(path.filt, basename(fnR))
+out <- filterAndTrim(fnF, filtF, fnR, filtR, 
+                     trimLeft=c(17,20), truncLen=c(240, 180), maxEE=2, 
+                     multithread=TRUE)
+out
+summary(out[,2]/out[,1])
+```
+
+Kept a high fraction of reads. One library appears to have failed, but other than that all look godo with solid read counts.
+
+Learn errors:
+```{r}
+errF <- learnErrors(filtF, multithread=TRUE)
+errR <- learnErrors(filtR, multithread=TRUE)
+plotErrors(errF)
+plotErrors(errR)
+```
+
+Error models look solid. Going to do sample inference using `pool=TRUE` to maximize the ability to detect rare *Lactobacillus* variants in each sample (takes ~15 minutes on my 2017 MacBook Pro):
+
+```{r}
+ddF <- dada(filtF, err=errF, pool=TRUE, multithread=TRUE)
+ddR <- dada(filtR, err=errR, pool=TRUE, multithread=TRUE)
+```
+
+Merge denoised forward and reverse reads:
+```{r}
+mm <- mergePairs(ddF, filtF, ddR, filtR, verbose=TRUE)
+```
+
+Make sequence table and remove chimeras:
+```{r}
+sta <- makeSequenceTable(mm)
+# Pooled chimera removal since denoising was also pooled
+st <- removeBimeraDenovo(sta, method="pooled", minFoldParentOverAbundance=4, multithread=TRUE)
+# st <- removeBimeraDenovo(sta, multithread=TRUE) # 
+sum(st)/sum(sta);dim(st)
+```
+
+Assign taxonomy:
+```{r}
+tax <- assignTaxonomy(st, "~/tax/silva_nr_v128_train_set.fa.gz", tryRC=TRUE, multithread=TRUE)
+taxp <- addSpecies(tax, "~/tax/silva_species_assignment_v128.fa.gz", tryRC=TRUE)
+```
+
+Save the relevant objects as RDS files to be read in by the analysis workflow:
+```{r}
+saveRDS(st, file.path(path.rds, "st.rds"))
+saveRDS(tax, file.path(path.rds, "tax.rds"))
+saveRDS(taxp, file.path(path.rds, "taxp.rds"))
+```
+
+Check if lactos are there:
+```{r}
+is.lacto <- taxp[,6] %in% "Lactobacillus"
+sum(is.lacto)
+unname(taxp[is.lacto,6:7])
+```
+
+
+
+
