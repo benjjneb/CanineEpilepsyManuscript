@@ -1,0 +1,127 @@
+---
+title: "Canine Epilepsy - Data Analysis"
+author: "BJC"
+date: "3/10/2020"
+output: html_document
+---
+
+## Setup
+
+Load libraries, setup paths, prepare environment:
+```{r init, warning=FALSE, message=FALSE}
+library(dada2);packageVersion("dada2")
+library(ggplot2)
+library(reshape2)
+path.fig <- "Figures/" # Local path. Assumes working directory is this files location
+path.rds <- "RDS/" # Local path...
+fnMeta <- "epilepsy_metadata.tsv" # Local path...
+theme_set(theme_bw())
+```
+
+Read in and coordinate the processed data:
+```{r}
+df <- read.table(fnMeta, header=TRUE, stringsAsFactors = FALSE)
+df$Category <- factor(df$Category)
+df$Household <- factor(df$Household)
+rownames(df) <- df$SampleID
+st <- readRDS(file.path(path.rds, "st.rds"))
+tax <- readRDS(file.path(path.rds, "taxp.rds"))
+if(!identical(colnames(st), rownames(tax))) stop("st/tax mismatch.")
+# Fix sample names for st, currently fastq filename rather than shroter sample name
+rownames(st) <- sapply(strsplit(rownames(st), "_"), `[`, 1)
+if(!all(rownames(st) %in% rownames(df))) stop("st/df mismatch.")
+# Coordinate df with st
+df <- df[rownames(st),]
+if(!identical(rownames(df), rownames(st))) stop("st/df mismatch (2).")
+# Make frequency table, i.e. normalized to proportions
+ft <- sweep(st, 1, rowSums(st), "/")
+```
+
+Save these input tables in renamed variables:
+```{r}
+dfi <- df
+sti <- st
+fti <- ft
+taxi <- tax
+sq <- colnames(st)
+```
+
+Do some QA on the sequencing libraries:
+```{r}
+plot(rowSums(st), log="y")
+```
+
+One sample had about 10x more reads than the others, and another sample had very few (<100) reads. Going to need to remove that very low read count sample:
+
+```{r}
+keepi <- rownames(sti)[rowSums(sti) > 100]
+st <- sti[keepi,]
+ft <- fti[keepi,]
+samdf <- dfi[keepi,]
+if(!identical(rownames(samdf), rownames(st))) stop("st/samdf mismatch (3).")
+```
+
+Identifying the Lactobacillus ASVs:
+```{r}
+i.lacto <- which(tax[,6] %in% "Lactobacillus")
+unname(tax[i.lacto,6:7]) # Just 2 have species IDs
+```
+
+Eight Lactobacillus ASVs. Just two have species assignments by the unambiguous exact-matching method, so will have to do some by hand species (or species-group) assignments.
+
+Looking at the overall frequencies of these:
+```{r}
+unname(colSums(ft[,i.lacto]))/sum(ft) # OOM dropoff after the first 3
+```
+
+These are at relatively low overall frequencies. The three most abundant Lactobacillus ASVs are only ~0.05\% of total bacterial frequency across the study, and the remaining are an order of magnitude less frequent than that.
+
+Let's look on a per-sample basis.
+```{r}
+plot(rowSums(ft[,i.lacto]), ylab="Lactobacillus proportion", xlab="Sample")
+```
+
+```{r, warning=FALSE}
+plot(rowSums(ft[,i.lacto]), log="y", ylab="Lactobacillus proportion", xlab="Sample")
+```
+
+One sample is ~4% Lactobacillus, all the rest at less than 0.2%, but most samples do have some Lactobacillus.
+
+Plotting the per-sample frequencies of each Lactobacillus ASV.
+```{r}
+ft.lacto <- ft[,i.lacto]
+colnames(ft.lacto) <- paste0("Lacto", seq_along(i.lacto))
+rownames(ft.lacto) <- seq(nrow(ft.lacto))
+pdf.lacto <- melt(ft.lacto, varnames=c("Sample", "ASV"), value.name="Proportion")
+ggplot(data=pdf.lacto, aes(x=Sample, y=Proportion, color=ASV)) + geom_point() +
+  scale_y_log10()
+```
+
+Quite a bit of co-occurrence here, in which multiple distinct Lactobacillus ASVs are observed int he same sample. No discernible evidence of this coming from multiple ASVs from the same strain though, as no ASVs are strongly correlated in their frequency distribution across samples.
+
+Consider how different the various Lactobacillus ASVs are from one another:
+```{r}
+outer(sq[i.lacto], sq[i.lacto], nwhamming, vec=TRUE)
+```
+
+These Lactobacillus ASVs are quite different from each other, on the order of 15 substitution difference between a random pair of Lactobacillus ASVs is about a 6\% sequence-level difference.
+
+Now going to to by-hand species-level assignment using BLAST against nt (excluding environmental/uncultured), and manual inspection/curation of the results. Only 100\% identity matches will be considered.
+
+```{r}
+dada2:::pfasta(sq[i.lacto])
+# BLAST againt nt excluding environmental/uncultured using web interface
+```
+
+By-hand species group assignments based on the BLAST 100\% match results. *Note, there are some ad hoc cutoffs being used here based on there being "lots more" of certain species matches than others, and these assignments are best interpreted as suggestive rather than definitive.*
+```{r}
+species.lacto <- c("johnsonii/gasseri/taiwanensis",
+                   "reuteri",
+                   "murinus/animals",
+                   "reuteri",
+                   "casei/paracasei",
+                   "sakei/curvatus",
+                   "aviarius",
+                   "amylovorus")
+```
+
