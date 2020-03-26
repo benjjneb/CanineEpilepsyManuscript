@@ -10,6 +10,9 @@ output: html_document
 Load libraries, setup paths, prepare environment:
 ```{r init, warning=FALSE, message=FALSE}
 library(dada2);packageVersion("dada2")
+library(phyloseq); packageVersion("phyloseq")
+library(DECIPHER); packageVersion("DECIPHER")
+library(phangorn); packageVersion("phangorn")
 library(ggplot2)
 library(reshape2)
 path.fig <- "Figures/" # Local path. Assumes working directory is this files location
@@ -46,6 +49,8 @@ taxi <- tax
 sq <- colnames(st)
 ```
 
+## Quality Assurance
+
 Do some QA on the sequencing libraries:
 ```{r}
 plot(rowSums(st), log="y")
@@ -54,43 +59,46 @@ plot(rowSums(st), log="y")
 One sample had about 10x more reads than the others, and another sample had very few (<100) reads. Going to need to remove that very low read count sample:
 
 ```{r}
-keepi <- rownames(sti)[rowSums(sti) > 100]
-st <- sti[keepi,]
-ft <- fti[keepi,]
-samdf <- dfi[keepi,]
+keep.samples <- rownames(sti)[rowSums(sti) > 100]
+st <- sti[keep.samples,]
+ft <- fti[keep.samples,]
+samdf <- dfi[keep.samples,]
 if(!identical(rownames(samdf), rownames(st))) stop("st/samdf mismatch (3).")
 ```
+
+## Identify and Explore the Lactobacilli
 
 Identifying the Lactobacillus ASVs:
 ```{r}
 i.lacto <- which(tax[,6] %in% "Lactobacillus")
-unname(tax[i.lacto,6:7]) # Just 2 have species IDs
+sq.lacto <- getSequences(tax)[i.lacto]
+unname(tax[sq.lacto,6:7]) # Just 2 have species IDs
 ```
 
 Eight Lactobacillus ASVs. Just two have species assignments by the unambiguous exact-matching method, so will have to do some by hand species (or species-group) assignments.
 
 Looking at the overall frequencies of these:
 ```{r}
-unname(colSums(ft[,i.lacto]))/sum(ft) # OOM dropoff after the first 3
+unname(colSums(ft[,sq.lacto]))/sum(ft) # OOM dropoff after the first 3
 ```
 
 These are at relatively low overall frequencies. The three most abundant Lactobacillus ASVs are only ~0.05\% of total bacterial frequency across the study, and the remaining are an order of magnitude less frequent than that.
 
 Let's look on a per-sample basis.
 ```{r}
-plot(rowSums(ft[,i.lacto]), ylab="Lactobacillus proportion", xlab="Sample")
+plot(rowSums(ft[,sq.lacto]), ylab="Lactobacillus proportion", xlab="Sample")
 ```
 
 ```{r, warning=FALSE}
-plot(rowSums(ft[,i.lacto]), log="y", ylab="Lactobacillus proportion", xlab="Sample")
+plot(rowSums(ft[,sq.lacto]), log="y", ylab="Lactobacillus proportion", xlab="Sample")
 ```
 
 One sample is ~4% Lactobacillus, all the rest at less than 0.2%, but most samples do have some Lactobacillus.
 
 Plotting the per-sample frequencies of each Lactobacillus ASV.
-```{r}
-ft.lacto <- ft[,i.lacto]
-colnames(ft.lacto) <- paste0("Lacto", seq_along(i.lacto))
+```{r, warning=FALSE}
+ft.lacto <- ft[,sq.lacto]
+colnames(ft.lacto) <- paste0("Lacto", seq_along(sq.lacto))
 rownames(ft.lacto) <- seq(nrow(ft.lacto))
 pdf.lacto <- melt(ft.lacto, varnames=c("Sample", "ASV"), value.name="Proportion")
 ggplot(data=pdf.lacto, aes(x=Sample, y=Proportion, color=ASV)) + geom_point() +
@@ -101,7 +109,7 @@ Quite a bit of co-occurrence here, in which multiple distinct Lactobacillus ASVs
 
 Consider how different the various Lactobacillus ASVs are from one another:
 ```{r}
-outer(sq[i.lacto], sq[i.lacto], nwhamming, vec=TRUE)
+outer(sq.lacto, sq.lacto, nwhamming, vec=TRUE)
 ```
 
 These Lactobacillus ASVs are quite different from each other, on the order of 15 substitution difference between a random pair of Lactobacillus ASVs is about a 6\% sequence-level difference.
@@ -109,13 +117,13 @@ These Lactobacillus ASVs are quite different from each other, on the order of 15
 Now going to to by-hand species-level assignment using BLAST against nt (excluding environmental/uncultured), and manual inspection/curation of the results. Only 100\% identity matches will be considered.
 
 ```{r}
-dada2:::pfasta(sq[i.lacto])
+dada2:::pfasta(sq.lacto)
 # BLAST againt nt excluding environmental/uncultured using web interface
 ```
 
 By-hand species group assignments based on the BLAST 100\% match results. *Note, there are some ad hoc cutoffs being used here based on there being "lots more" of certain species matches than others, and these assignments are best interpreted as suggestive rather than definitive.*
 ```{r}
-species.lacto <- c("johnsonii/gasseri/taiwanensis",
+species.lacto <- c("johnsonii/gasseri",
                    "reuteri",
                    "murinus/animals",
                    "reuteri",
@@ -124,4 +132,137 @@ species.lacto <- c("johnsonii/gasseri/taiwanensis",
                    "aviarius",
                    "amylovorus")
 ```
+
+Taking a closer look at Lacto ASV2/4 that were both assigned to *L. reuteri*. Could they be intragenomic variants?
+```{r}
+freq.lacto2 <- ft[,sq.lacto[[2]]]
+freq.lacto4 <- ft[,sq.lacto[[4]]]
+cor(freq.lacto2, freq.lacto4)
+cor(freq.lacto2, freq.lacto4, method="spearman")
+```
+
+```{r}
+p <- ggplot(data=data.frame(Lacto2=freq.lacto2, Lacto4=freq.lacto4), aes(x=Lacto2, y=Lacto4)) + 
+     geom_point()
+p
+p + scale_y_log10() + scale_x_log10()
+```
+
+It's possible they could be intragenomic variants from a single strain, but the evidence is not compelling. The huge Pearson correlation is driven by the one sample in which both ASVs appear in high frequency.
+
+## Make Table of Lactobacillus species prevalance based on 16S results
+
+Creating a table of prevalence (i.e. number of samples in which a taxa was detected) for each of the 7 Lactobacillus species detected by 16S (remember that 2/8 ASVs both came from *L. reuteri*). This data makes up Table 2 in the manuscript.
+```{r}
+species <- unique(species.lacto)
+df.lacto <- data.frame(Species = paste("Lactobacillus", species), 
+                       Prevalence = integer(length(species)), 
+                       Frequency=numeric(length(species)))
+rownames(df.lacto) <- species
+for(spc in species) {
+  ii <- i.lacto[species.lacto==spc]
+  prv <- sum(rowSums(st[,ii,drop=FALSE])>0)
+  frq <- sum(ft[,ii,drop=FALSE])/nrow(ft)
+  df.lacto[spc,"Prevalence"] <- prv
+  df.lacto[spc,"Frequency"] <- frq
+}
+df.lacto <- df.lacto[order(df.lacto$Prevalence, decreasing=TRUE),]
+rownames(df.lacto) <- NULL
+df.lacto
+write.table(df.lacto, file.path(path.fig, "Lacto_prev_freq.tsv"), 
+            sep="\t", row.names=FALSE, quote=FALSE)
+```
+
+## Compare Lacto CFUs to Lacto 16S Frequencies
+
+We generated Lactobacillus CFU counts from these same samples. How well do the frequencies of Lactoabcillus as measured by 16S rRNA gene sequencing correspond to those CFU counts?
+
+```{r, warning=FALSE}
+samdf$Freq.lacto <- rowSums(ft[,i.lacto])
+plot(samdf$CFU.lacto, samdf$Freq.lacto)
+plot(samdf$CFU.lacto, samdf$Freq.lacto, log="xy")
+```
+
+There is some correlation, but it is not that strong. Of course, this is expected, as the CFU count is an absolute abundance count, while the 16S gene frequency is a relative abundance measurement, and both are subject to different biases in their sensitivity to *Lactobacillus* generally, that could also potentially vary between different *Lactobacillus* species.
+
+How about the consistency of presence-absence detections across the methods?
+```{r}
+has.CFU <- !is.na(samdf$CFU.lacto) # At least one sample had a failed CFU measurement
+table(samdf$CFU.lacto[has.CFU]>0, samdf$Freq.lacto[has.CFU]>0)
+```
+
+No correspondence in this crude presence-absence comparison. Perhaps better selecting presence-absence thresholds could improve this, but again, it is well known that CFU plating methods and community sequencing methods have qualitatively different sensitivity thresholds to rare taxa.
+
+Now making the publication quality figure of this correspondence:
+```{r, warning=FALSE}
+p.cor <- ggplot(data=samdf, aes(x=CFU.lacto, y=Freq.lacto)) + geom_point() + 
+  scale_x_log10() + scale_y_log10() + 
+  xlab("CFUs/g (log10 scale)") + ylab("16S Frequency (log10 scale)") +
+  geom_smooth(method="lm") + ggtitle("Lactobacillus")
+p.cor
+ggsave(file.path(path.fig, "lacto_cor.pdf"), p.cor, width=6, height=4, units="in")
+ggsave(file.path(path.fig, "lacto_cor.png"), p.cor, width=6, height=4, units="in")
+```
+
+Quantifying the correlation between these measures:
+```{r}
+fitdf <- samdf[has.CFU,]
+fitdf$LogCFU <- log(fitdf$CFU.lacto)
+fitdf$LogFreq <- log(fitdf$Freq.lacto)
+fitdf.nozeros <- fitdf[is.finite(fitdf$LogCFU) & is.finite(fitdf$LogFreq),]
+mod <- lm(LogCFU ~ LogFreq, fitdf.nozeros)
+summary(mod)
+```
+
+Note that in this analysis we excluded the zero measurements (by either method). Alternatively one could replace the zeros with defined replacement values, e.g. half the minimum value observed in the dataset. We also check that approach to ensure that our qualitative conclusions remain the same:
+
+```{r}
+fitdf.pseudo <- fitdf
+fitdf.pseudo$CFU.lacto[fitdf.pseudo$CFU.lacto == 0] <- 
+  (1./2.) * min(fitdf.pseudo$CFU.lacto[fitdf.pseudo$CFU.lacto>0])
+fitdf.pseudo$Freq.lacto[fitdf.pseudo$Freq.lacto == 0] <- 
+  (1./2.) * min(fitdf.pseudo$Freq.lacto[fitdf.pseudo$Freq.lacto>0])
+fitdf.pseudo$LogCFU <- log(fitdf.pseudo$CFU.lacto)
+fitdf.pseudo$LogFreq <- log(fitdf.pseudo$Freq.lacto)
+mod.pseudo <- lm(LogCFU ~ LogFreq, fitdf.pseudo)
+summary(mod.pseudo)
+```
+
+Clearly R^2 is less, but still a significant trend and a non-trivial R^2 of greater than 0.2. Will use the previous numbers in the paper though, as they correspond to the fit line on the plot which excludes the zero/infinites.
+
+## Ordination plotting of microbiome profiles
+
+First we'll now move the data into the phyloseq R package which provides some convenient interfaces for doing ordination plotting. For this, we will only keep samples from households in which samples from both animals (the epileptic and control dog) are available.
+
+```{r}
+ps <- phyloseq(otu_table(ft, taxa_are_rows=FALSE), sample_data(samdf), tax_table(tax))
+tab <- table(samdf$Household) # 020Petey was removed for too few reads, so just 1 member of Household 10
+keep <- names(tab)[tab>1]
+ps <- subset_samples(ps, Household %in% keep); ps # 26 samples, OK
+ps <- subset_taxa(ps, taxa_sums(ps)>0)
+seqs <- taxa_names(ps); names(seqs) <- seqs
+if(!identical(unname(seqs), sq)) stop("Mismatch between phyloseq seqs and sq.")
+```
+
+Now to create a phylogenetic tree for these ASVs. The code here is adapted from [Bioconductor Workflow for Microbiome Data Analysis: from raw reads to community analyses](https://f1000research.com/articles/5-1492/v2).
+```{r}
+## Uncomment to run this part, otherwise will load pre-computed object
+#alignment <- AlignSeqs(DNAStringSet(seqs), anchor=NA)
+#phang.align <- phyDat(as(alignment, "matrix"), type="DNA")
+#dm <- dist.ml(phang.align)
+#treeNJ <- NJ(dm) # Note, tip order != sequence order
+#fit = pml(treeNJ, data=phang.align)
+#fitGTR <- update(fit, k=4, inv=0.2)
+#fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+#                    rearrangement = "stochastic", control = pml.control(trace = 0))
+#saveRDS(fitGTR, file.path(path.rds, "fitGTR.rds"))
+## End uncomment
+fitGTR <- readRDS(file.path(path.rds, "fitGTR.rds"))
+psord <- merge_phyloseq(ps, phy_tree(fitGTR$tree))
+if(!identical(otu_table(psord), otu_table(ps))) stop("psord/ps mismatch.")
+```
+
+
+
+
 
