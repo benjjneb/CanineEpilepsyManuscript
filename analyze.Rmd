@@ -19,6 +19,7 @@ path.fig <- "Figures/" # Local path. Assumes working directory is this files loc
 path.rds <- "RDS/" # Local path...
 fnMeta <- "epilepsy_metadata.tsv" # Local path...
 theme_set(theme_bw())
+set.seed(100)
 ```
 
 Read in and coordinate the processed data:
@@ -200,7 +201,7 @@ p.cor <- ggplot(data=samdf, aes(x=CFU.lacto, y=Freq.lacto)) + geom_point() +
   xlab("CFUs/g (log10 scale)") + ylab("16S Frequency (log10 scale)") +
   geom_smooth(method="lm") + ggtitle("Lactobacillus")
 p.cor
-ggsave(file.path(path.fig, "lacto_cor.pdf"), p.cor, width=6, height=4, units="in")
+ggsave(file.path(path.fig, "lacto_cor.pdf"), p.cor, width=6, height=4, units="in", useDingbats=FALSE)
 ggsave(file.path(path.fig, "lacto_cor.png"), p.cor, width=6, height=4, units="in")
 ```
 
@@ -261,6 +262,48 @@ fitGTR <- readRDS(file.path(path.rds, "fitGTR.rds"))
 psord <- merge_phyloseq(ps, phy_tree(fitGTR$tree))
 if(!identical(otu_table(psord), otu_table(ps))) stop("psord/ps mismatch.")
 ```
+
+Plotting ordinations for the manuscript figure. First perform the ordination calculations:
+```{r, results='hide'}
+ord.bray.mds <- ordinate(psord, method="MDS", distance="bray")
+ord.bray.nmds <- ordinate(psord, method="NMDS", distance="bray")
+ord.wuf.mds <- ordinate(psord, method="MDS", distance="wunifrac")
+ord.wuf.nmds <- ordinate(psord, method="NMDS", distance="wunifrac")
+```
+
+Plot Bray_Curtis and weighted Unifrac ordination figures, using both MDS and NMDS ordination methods, to confirm that results are qualitatively robust (i.e. households group together) to choice of dissimilarity and ordination method.
+
+Bray-Curtis ordinations:
+```{r}
+plot.ord <- function(psi, ordi, color="Category", label="Household", size=5, axes=c(1,2)) {
+  p <- plot_ordination(psi, ordi, axes=axes)
+  ggplot(data=p$data, aes_string(x=quo_name(p$mapping$x), y=quo_name(p$mapping$y), 
+                                 color=color, label=label)) + geom_text(size=size)
+}
+
+p.bray <- plot.ord(psord, ord.bray.mds)
+p.bray + ggtitle("Bray - MDS")
+plot.ord(psord, ord.bray.nmds) + ggtitle("Bray - NMDS")
+```
+
+Weighted-Unifrac ordinations:
+```{r}
+p.wuf <- plot.ord(psord, ord.wuf.mds)
+p.wuf + ggtitle("WUF - MDS")
+plot.ord(psord, ord.wuf.nmds) + ggtitle("WUF - NMDS")
+```
+
+Saving the MDS ordinations for use in the mansucript:
+```{r}
+ggsave(file.path(path.fig, "ordination_bray.pdf"), p.bray, width=6, height=4, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "ordination_bray.png"), p.bray, width=6, height=4, units="in")
+ggsave(file.path(path.fig, "ordination_unifrac.pdf"), p.wuf, width=6, height=4, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "ordination_unifrac.png"), p.wuf, width=6, height=4, units="in")
+```
+
+## Permanova testing of houshole effect on the microbiome
+
+The tendency for samples from the same household to group together in the ordination is clear visually, but to confirm this insight we explore this statistically as well using the PERAMANOVA method.
 
 
 
