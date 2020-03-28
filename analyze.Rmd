@@ -25,7 +25,7 @@ set.seed(100)
 
 Read in and coordinate the processed data:
 ```{r}
-df <- read.table(fnMeta, header=TRUE, stringsAsFactors = FALSE)
+df <- read.table(fnMeta, header=TRUE, sep="\t", stringsAsFactors = FALSE)
 df$Category <- factor(df$Category)
 df$Household <- factor(df$Household)
 rownames(df) <- df$SampleID
@@ -355,8 +355,19 @@ vegan::adonis(bc ~ Category, data = samdf.ord, strata=samdf.ord$Household, permu
 
 There is no statistically significant Category effect. P > 0.05 (much greater) whether controlling for Household or not.
 
+Next perform permanova testing on Age, both independently, and when controlling for the strong Household effect by constraining permutations to be within households:
+```{r}
+vegan::adonis(bc ~ Age, data = samdf.ord, permutations=1e4)
+vegan::adonis(bc ~ Age, data = samdf.ord, strata=samdf.ord$Household, permutations=1e4)
+```
 
+There is no statistically significant Age effect (P > 0.05). However, it "trends towards significance" when controlling for the Household effect, so Age is certainly worth revisiting in our subsequent larger study, also because other larger studies have shown an Age effect.
 
+Finally perform permanova testing on Sex, both independently, and when controlling for the strong Household effect by constraining permutations to be within households:
+```{r}
+vegan::adonis(bc ~ Sex, data = samdf.ord, permutations=1e4)
+vegan::adonis(bc ~ Sex, data = samdf.ord, strata=samdf.ord$Household, permutations=1e4)
+```
 
-
+There is no statistically significant Sex effect. P > 0.05 (much greater) whether controlling for Household or not.
 
