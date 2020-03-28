@@ -1,7 +1,7 @@
 ---
 title: "Canine Epilepsy - Data Analysis"
 author: "BJC"
-date: "3/10/2020"
+date: "3/28/2020"
 output: html_document
 ---
 
@@ -371,3 +371,37 @@ vegan::adonis(bc ~ Sex, data = samdf.ord, strata=samdf.ord$Household, permutatio
 
 There is no statistically significant Sex effect. P > 0.05 (much greater) whether controlling for Household or not.
 
+## Differential Prevalence testing of Lactobacillus
+
+### Fisher's exact testing
+
+We'll perform Fisher's exact testing of the differential prevalence of each ASV in the Epilepsy and Control categories:
+```{r}
+stv <- as(otu_table(psord), "matrix")
+stv10 <- stv[,colSums(stv>0)>=2 & colSums(stv>0)<=(nrow(stv)-2)] # At least two presences/absences for each
+ctv <- sample_data(psord)$Category
+fpv <- sapply(colnames(stv10), function(sqi) fisher.test(x=factor(stv10[,sqi]>0), y=ctv)$p.value)
+plot(fpv, ylim=c(0,1)) 
+abline(h=0.1, col="red")
+```
+
+Given that this is an exploratory analysis with a high number of hypotheses, there is nothing statistically significant here after any reasonable FDR correction.
+
+We look more closely at our prior hypotheses, the Lactobacilli:
+```{r}
+unname(fpv[sq.lacto])
+```
+
+Nope, even in the absence of an FDR correction for these taxa we previously proposed to study, there is no significant differential prevalence.
+
+Last, we will look at the Lactobacillus genus:
+```{r}
+table(ctv,LactoPresent=rowSums(stv10[,sq.lacto])>0)
+fisher.test(x=factor(rowSums(stv10[,sq.lacto])>0), y=ctv)$p.value
+```
+
+Nope.
+
+```{r}
+sessionInfo()
+```

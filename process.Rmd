@@ -96,6 +96,8 @@ sum(is.lacto)
 unname(taxp[is.lacto,6:7])
 ```
 
-
+```{r}
+sessionInfo()
+```
 
 
