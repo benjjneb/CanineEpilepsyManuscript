@@ -107,7 +107,7 @@ ggplot(data=pdf.lacto, aes(x=Sample, y=Proportion, color=ASV)) + geom_point() +
   scale_y_log10()
 ```
 
-Quite a bit of co-occurrence here, in which multiple distinct Lactobacillus ASVs are observed int he same sample. No discernible evidence of this coming from multiple ASVs from the same strain though, as no ASVs are strongly correlated in their frequency distribution across samples.
+Quite a bit of co-occurrence here, in which multiple distinct Lactobacillus ASVs are observed in the same sample. No discernible evidence of this coming from multiple ASVs from the same strain though, as no ASVs are strongly correlated in their frequency distribution across samples.
 
 Consider how different the various Lactobacillus ASVs are from one another:
 ```{r}
