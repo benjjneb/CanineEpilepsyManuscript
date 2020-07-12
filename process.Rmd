@@ -21,7 +21,7 @@ path.rds <- "RDS/" # Local path...
 fnF <- list.files(path.fastq, pattern="_F.fastq.gz", full.names=TRUE)
 fnR <- list.files(path.fastq, pattern="_R.fastq.gz", full.names=TRUE)
 fnMeta <- "epilepsy_mapping.txt" # Local path...
-# Primer seqeuences are included on the reads
+# Primer sequences are included on the reads
 F515 <- "GTGCCAGCAGCCGCGGT" # 17 nt
 R806 <- "GGACTACHVGGGTWTCTAAT" # 20nt
 ```
